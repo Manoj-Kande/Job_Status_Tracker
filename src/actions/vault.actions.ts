@@ -42,7 +42,10 @@ async function resolveOrCreatePathInTx(
     if (existing) {
       parentId = existing.id;
     } else {
-      const created = await tx.vaultFolder.create({ data: { userId, parentId, name } });
+      const created: { id: string } = await tx.vaultFolder.create({
+        data: { userId, parentId, name },
+        select: { id: true },
+      });
       parentId = created.id;
     }
   }
@@ -137,10 +140,7 @@ const linkSchema = z.object({
 
 export async function updateLink(id: string, input: Partial<z.input<typeof linkSchema>>) {
   const user = await requireUser();
-  const existing: { id: string } | null = await tx.vaultFolder.findFirst({
-  where: { userId, parentId, name },
-  select: { id: true },
-});
+  const existing = await prisma.vaultLink.findFirst({ where: { id, userId: user.id } });
   if (!existing) throw new Error("NOT_FOUND");
   const data = linkSchema.partial().parse(input);
   const link = await prisma.vaultLink.update({ where: { id }, data });
