@@ -134,7 +134,10 @@ const linkSchema = z.object({
 
 export async function updateLink(id: string, input: Partial<z.input<typeof linkSchema>>) {
   const user = await requireUser();
-  const existing = await prisma.vaultLink.findFirst({ where: { id, userId: user.id } });
+  const existing: { id: string } | null = await tx.vaultFolder.findFirst({
+  where: { userId, parentId, name },
+  select: { id: true },
+});
   if (!existing) throw new Error("NOT_FOUND");
   const data = linkSchema.partial().parse(input);
   const link = await prisma.vaultLink.update({ where: { id }, data });
