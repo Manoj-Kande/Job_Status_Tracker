@@ -35,7 +35,10 @@ async function resolveOrCreatePathInTx(
 ): Promise<string | null> {
   let parentId: string | null = null;
   for (const name of segments) {
-    const existing = await tx.vaultFolder.findFirst({ where: { userId, parentId, name } });
+    const existing: { id: string } | null = await tx.vaultFolder.findFirst({
+      where: { userId, parentId, name },
+      select: { id: true },
+    });
     if (existing) {
       parentId = existing.id;
     } else {
