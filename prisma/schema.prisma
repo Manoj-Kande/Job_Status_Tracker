@@ -1,0 +1,338 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+// ---------- Enums ----------
+
+enum WorkMode {
+  REMOTE
+  HYBRID
+  ONSITE
+  UNKNOWN
+}
+
+enum Source {
+  LINKEDIN
+  COMPANY_SITE
+  JOB_BOARD
+  REFERRAL_TIP
+  RECRUITER
+  FRIEND
+  OTHER
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum JobType {
+  FULL_TIME
+  INTERNSHIP
+  CONTRACT
+  PART_TIME
+  OTHER
+}
+
+enum AppliedVia {
+  REFERRAL
+  COMPANY_SITE
+  LINKEDIN_EASY_APPLY
+  JOB_BOARD
+  EMAIL
+  RECRUITER
+  OTHER
+}
+
+enum ApplicationStatus {
+  TO_APPLY
+  REFERRAL_NEEDED
+  REFERRAL_REQUESTED
+  REFERRAL_RECEIVED
+  APPLIED_DIRECT
+  APPLIED_REFERRAL
+  UNDER_REVIEW
+  RECRUITER_SCREENING
+  ASSESSMENT
+  INTERVIEW_SCHEDULED
+  INTERVIEW_ROUND_1
+  INTERVIEW_ROUND_2
+  INTERVIEW_ROUND_3
+  FINAL_INTERVIEW
+  OFFER_RECEIVED
+  OFFER_ACCEPTED
+  OFFER_DECLINED
+  REJECTED
+  WITHDRAWN
+  ROLE_CLOSED
+  GHOSTED
+}
+
+enum ReferralStatus {
+  NOT_ASKED
+  ASKED
+  AWAITING_RESPONSE
+  ACCEPTED
+  DECLINED
+  NO_RESPONSE
+  REFERRAL_SUBMITTED
+}
+
+enum FollowUpType {
+  REFERRAL
+  APPLICATION
+  RECRUITER
+  INTERVIEW
+  OFFER
+  OTHER
+}
+
+enum InterviewType {
+  HR
+  TECHNICAL
+  CODING
+  SYSTEM_DESIGN
+  MANAGERIAL
+  HIRING_MANAGER
+  FINAL
+  OTHER
+}
+
+enum InterviewOutcome {
+  PENDING
+  CLEARED
+  REJECTED
+  WAITING_FOR_UPDATE
+}
+
+// ---------- Models ----------
+
+model User {
+  id           String   @id @default(cuid())
+  clerkUserId  String   @unique
+  fullName     String?
+  email        String   @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  jobApplications JobApplication[]
+  resumeVersions  ResumeVersion[]
+  vaultFolders    VaultFolder[]
+  vaultLinks      VaultLink[]
+}
+
+// ---------- Vault ----------
+// User-organized link library: arbitrarily nested folders, links can
+// belong to multiple folders at once (many-to-many via VaultLinkFolder).
+
+model VaultFolder {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name     String
+
+  parentId String?
+  parent   VaultFolder?  @relation("VaultFolderChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children VaultFolder[] @relation("VaultFolderChildren")
+
+  links     VaultLinkFolder[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, parentId])
+}
+
+model VaultLink {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  url   String
+  title String?
+  notes String?
+
+  folders   VaultLinkFolder[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/** Many-to-many join: a link can sit in more than one folder at once. */
+model VaultLinkFolder {
+  id     String @id @default(cuid())
+  // Denormalized for cheap, join-free "all mappings for this user" loads.
+  userId String
+
+  linkId String
+  link   VaultLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  folderId String
+  folder   VaultFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([linkId, folderId])
+  @@index([userId])
+  @@index([folderId])
+  @@index([linkId])
+}
+
+model JobApplication {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyName        String
+  jobTitle           String
+  jobPostingUrl       String?
+  location            String?
+  workMode            WorkMode   @default(UNKNOWN)
+  source              Source     @default(OTHER)
+  descriptionNotes    String?
+  priority            Priority   @default(MEDIUM)
+  applicationDeadline DateTime?
+  salaryRange         String?
+  jobType             JobType    @default(FULL_TIME)
+
+  dateDiscovered DateTime  @default(now())
+  dateApplied    DateTime?
+  appliedVia     AppliedVia?
+
+  applicationStatus ApplicationStatus @default(TO_APPLY)
+
+  resumeVersionUsed    String?
+  // Real link to a Resume Library entry (preferred). resumeVersionUsed
+  // above is kept as a free-text fallback for jobs recorded before a
+  // library existed, or for anyone who doesn't want to maintain one.
+  resumeVersionId      String?
+  resumeVersion        ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
+  coverLetterUsed      Boolean @default(false)
+  coverLetterVersion   String?
+
+  recruiterName          String?
+  recruiterEmail         String?
+  recruiterLinkedInUrl   String?
+
+  nextFollowUpDate DateTime?
+  reminderNotes    String?
+
+  archived  Boolean  @default(false)
+
+  // Save-for-later queue: jobs the user has bookmarked to apply to later.
+  // These are kept out of the active pipeline (kanban/table) until the
+  // user marks them applied, at which point they move into the pipeline.
+  savedForLater Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  referrals       Referral[]
+  followUps       FollowUp[]
+  interviewRounds InterviewRound[]
+  statusHistory   StatusHistory[]
+
+  @@index([userId, applicationStatus])
+  @@index([userId, archived])
+  @@index([userId, savedForLater])
+  @@index([resumeVersionId])
+  @@index([userId, nextFollowUpDate])
+  @@index([userId, companyName, jobTitle])
+}
+
+model Referral {
+  id               String   @id @default(cuid())
+  jobApplicationId String
+  jobApplication   JobApplication @relation(fields: [jobApplicationId], references: [id], onDelete: Cascade)
+
+  contactName          String
+  contactRelation      String?
+  contactEmail         String?
+  contactLinkedInUrl   String?
+  referralAskDate      DateTime?
+  referralStatus       ReferralStatus @default(NOT_ASKED)
+  referralSubmittedDate DateTime?
+  referralFollowUpDate DateTime?
+  notes                String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jobApplicationId])
+}
+
+model FollowUp {
+  id               String   @id @default(cuid())
+  jobApplicationId String
+  jobApplication   JobApplication @relation(fields: [jobApplicationId], references: [id], onDelete: Cascade)
+
+  followUpDate  DateTime
+  followUpType  FollowUpType @default(OTHER)
+  reminderNotes String?
+  completed     Boolean  @default(false)
+  completedAt   DateTime?
+  outcomeNotes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jobApplicationId, completed])
+  @@index([followUpDate, completed])
+}
+
+model InterviewRound {
+  id               String   @id @default(cuid())
+  jobApplicationId String
+  jobApplication   JobApplication @relation(fields: [jobApplicationId], references: [id], onDelete: Cascade)
+
+  roundName         String
+  roundNumber       Int
+  interviewDateTime DateTime?
+  interviewType     InterviewType @default(OTHER)
+  interviewerNames  String?
+  notes             String?
+  topicsDiscussed   String?
+  outcome           InterviewOutcome @default(PENDING)
+  nextActionDate    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jobApplicationId])
+}
+
+model StatusHistory {
+  id               String   @id @default(cuid())
+  jobApplicationId String
+  jobApplication   JobApplication @relation(fields: [jobApplicationId], references: [id], onDelete: Cascade)
+
+  previousStatus ApplicationStatus?
+  newStatus      ApplicationStatus
+  eventType      String
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  @@index([jobApplicationId, createdAt])
+}
+
+model ResumeVersion {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  fileUrl   String
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobApplications JobApplication[]
+
+  @@index([userId])
+}
