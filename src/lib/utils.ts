@@ -15,6 +15,14 @@ export function parseDateInput(value: string): Date {
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
+/** Extracts just the profile slug from a LinkedIn URL for compact display,
+ *  e.g. "https://www.linkedin.com/in/priya-nair-8a2b1/" -> "priya-nair-8a2b1". */
+export function linkedInHandle(url: string): string {
+  const cleaned = url.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
+  const match = cleaned.match(/linkedin\.com\/(?:in|company)\/([^/?#]+)/i);
+  return match ? decodeURIComponent(match[1]) : cleaned;
+}
+
 /** Formats a Date (or null/undefined) into a "YYYY-MM-DD" string for date inputs. */
 export function toDateInputValue(value: Date | string | null | undefined): string {
   if (!value) return "";

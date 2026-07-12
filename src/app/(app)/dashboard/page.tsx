@@ -1,5 +1,5 @@
 import { currentUser } from "@clerk/nextjs/server";
-import { Bell, AlarmClock, Flame, CalendarClock, Clock3, Briefcase } from "lucide-react";
+import { Bell, AlarmClock, Flame, CalendarClock, Clock3, Briefcase, Users } from "lucide-react";
 import Link from "next/link";
 import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,15 @@ import { ActivityTimeline } from "@/components/dashboard/activity-timeline";
 import { FunnelChart } from "@/components/dashboard/funnel-chart";
 import { EmptyState } from "@/components/shared/empty-state";
 import { getDashboardData } from "@/lib/jobs/dashboard-queries";
+import { getUpcomingReferralFollowUps } from "@/lib/referral-contacts/queries";
+import { getCurrentUser } from "@/lib/auth";
 import { format } from "date-fns";
 
 export default async function DashboardPage() {
   const [user, data] = await Promise.all([currentUser(), getDashboardData()]);
   const firstName = user?.firstName ?? "there";
+  const dbUser = await getCurrentUser();
+  const referralFollowUps = dbUser ? await getUpcomingReferralFollowUps(dbUser.id) : [];
 
   if (!data.signedIn) {
     return (
@@ -120,6 +124,17 @@ export default async function DashboardPage() {
               primary: j.companyName,
               secondary: `${j.jobTitle} · no update in 14+ days`,
               href: `/applications/${j.id}`,
+            }))}
+          />
+          <WidgetCard
+            title="Referral follow-ups due"
+            icon={Users}
+            emptyLabel="No referral contacts waiting on a follow-up."
+            items={referralFollowUps.map((c) => ({
+              id: c.id,
+              primary: c.fullName,
+              secondary: `${c.company || "No company set"} · due ${format(c.nextFollowUpDate!, "MMM d")}`,
+              href: `/referral-contacts`,
             }))}
           />
         </div>

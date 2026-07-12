@@ -13,10 +13,7 @@ export function VaultSearch() {
   const [results, setResults] = React.useState<Awaited<ReturnType<typeof searchVaultLinksAction>>>([]);
 
   React.useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
+    if (!query.trim()) return;
     const t = setTimeout(() => {
       searchVaultLinksAction(query).then(setResults);
     }, 250);
