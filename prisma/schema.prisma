@@ -124,6 +124,114 @@ model User {
   resumeVersions  ResumeVersion[]
   vaultFolders    VaultFolder[]
   vaultLinks      VaultLink[]
+
+  referralContacts        ReferralContact[]
+  referralContactStatuses ReferralContactStatus[]
+  referralStatCards       ReferralStatCard[]
+}
+
+// ---------- Referral Contacts ----------
+// A standalone LinkedIn-contact directory for tracking potential referrers,
+// independent of any single JobApplication (contrast with the Referral
+// model above, which is scoped to one job). Statuses are a per-user table
+// rather than an enum so users can add their own custom stages at runtime.
+
+model ReferralContactStatus {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  label     String
+  // Built-in statuses are seeded per-user and can be relabelled in code
+  // but not renamed/deleted by the user; custom ones are fully user-owned.
+  isCustom  Boolean  @default(true)
+  sortOrder Int      @default(0)
+
+  createdAt DateTime @default(now())
+
+  contacts  ReferralContact[]
+
+  @@unique([userId, label])
+  @@index([userId])
+}
+
+// The stat-strip cards shown above the contact list ("Ready to ask",
+// "Waiting to hear back", etc.) are user-configurable groups of statuses
+// rather than a fixed 3-bucket split — a card just names a set of status
+// ids and counts how many contacts currently sit in one of them. This
+// lets a user rename, reorder, delete, or add cards, and re-map which
+// statuses feed which card, without any code change. The always-first
+// "Total contacts" card is derived (all contacts), not stored here.
+model ReferralStatCard {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  label     String
+  statusIds String[] @default([])
+  sortOrder Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model ReferralContact {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fullName    String
+  company     String
+  linkedInUrl String
+  jobTitle    String?
+  notes       String?
+
+  statusId    String
+  status      ReferralContactStatus @relation(fields: [statusId], references: [id])
+
+  // Optional link to a tracked job application at the same company, so the
+  // two referral systems (this directory vs. the per-job Referral tab) can
+  // be jumped between without merging their data models.
+  jobApplicationId String?
+  jobApplication   JobApplication? @relation(fields: [jobApplicationId], references: [id], onDelete: SetNull)
+
+  // Drives the dashboard "Referral follow-ups due" widget, mirroring the
+  // job pipeline's nextFollowUpDate/isStale pattern.
+  nextFollowUpDate DateTime?
+
+  // Manual drag-to-reorder rank, scoped per-user; used only when the
+  // "My Ranking (Custom)" sort option is active.
+  rank        Int      @default(0)
+
+  // True for stub contacts created via Bulk Add (link-only, no name/company
+  // yet) until the user fills in the remaining details.
+  isIncomplete Boolean @default(false)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  activity    ReferralContactActivity[]
+
+  @@index([userId, company])
+  @@index([userId, statusId])
+  @@index([userId, rank])
+  @@index([userId, nextFollowUpDate])
+  @@index([jobApplicationId])
+}
+
+/** Timestamped "asked on X, they said Y" log entries for a contact — lets a
+ *  user see the history of interactions, not just the current status. */
+model ReferralContactActivity {
+  id        String   @id @default(cuid())
+  contactId String
+  contact   ReferralContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  note      String
+  createdAt DateTime @default(now())
+
+  @@index([contactId, createdAt])
 }
 
 // ---------- Vault ----------
@@ -237,6 +345,7 @@ model JobApplication {
   followUps       FollowUp[]
   interviewRounds InterviewRound[]
   statusHistory   StatusHistory[]
+  referralContacts ReferralContact[]
 
   @@index([userId, applicationStatus])
   @@index([userId, archived])
