@@ -1,4 +1,4 @@
-"use server";
+http://localhost:3000/http://localhost:3000/"use server";
 
 import { revalidatePath, revalidateTag } from "next/cache";
 import type { Prisma } from "@prisma/client";
