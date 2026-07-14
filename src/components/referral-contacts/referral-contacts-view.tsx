@@ -409,7 +409,7 @@ export function ReferralContactsView({
       />
       <BulkAddDialog open={bulkOpen} onOpenChange={setBulkOpen} companies={companies} />
       <ManageStatusesDialog open={statusesOpen} onOpenChange={setStatusesOpen} statuses={statuses} />
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} contacts={contacts} statuses={statuses} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
       <ResetStatusDialog
         open={resetOpen}

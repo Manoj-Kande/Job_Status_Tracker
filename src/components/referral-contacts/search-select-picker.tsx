@@ -26,6 +26,7 @@ export function SearchSelectPicker({
   selectedIds,
   onToggle,
   onClear,
+  onSelectFiltered,
   placeholder = "Search...",
   emptyText = "No matches",
 }: {
@@ -33,6 +34,10 @@ export function SearchSelectPicker({
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
   onClear: () => void;
+  /** Optional: adds a "Select all shown" action that selects every row
+   *  currently matching the search query (e.g. search "Acme" to grab
+   *  everyone at that company in one click, then hand-uncheck a few). */
+  onSelectFiltered?: (ids: string[]) => void;
   placeholder?: string;
   emptyText?: string;
 }) {
@@ -110,9 +115,20 @@ export function SearchSelectPicker({
       </div>
       <div className="flex items-center justify-between border-t border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
         <span>{selectedIds.size} selected</span>
-        <button type="button" onClick={onClear} className="font-medium text-primary hover:underline">
-          Clear
-        </button>
+        <div className="flex items-center gap-3">
+          {onSelectFiltered && query.trim() && filtered.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onSelectFiltered(filtered.map((i) => i.id))}
+              className="font-medium text-primary hover:underline"
+            >
+              Select all shown ({filtered.length})
+            </button>
+          )}
+          <button type="button" onClick={onClear} className="font-medium text-primary hover:underline">
+            Clear
+          </button>
+        </div>
       </div>
     </div>
   );
