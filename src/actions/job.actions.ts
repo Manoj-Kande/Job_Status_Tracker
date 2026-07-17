@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import type { ApplicationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
@@ -55,6 +55,7 @@ export async function quickAddJob(input: QuickAddInput) {
 
   revalidatePath("/applications");
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${user.id}`, "max");
   revalidatePath("/later");
   return job;
 }
@@ -103,6 +104,7 @@ export async function createJob(input: JobFormInput) {
 
   revalidatePath("/applications");
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${user.id}`, "max");
   revalidatePath("/later");
   return job;
 }
@@ -128,6 +130,7 @@ export async function updateJob(id: string, input: Partial<JobFormInput>) {
   revalidatePath("/applications");
   revalidatePath(`/applications/${id}`);
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${user.id}`, "max");
   return job;
 }
 
@@ -171,6 +174,7 @@ export async function updateJobStatus(id: string, newStatus: ApplicationStatus, 
   revalidatePath("/applications");
   revalidatePath(`/applications/${id}`);
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${user.id}`, "max");
   revalidatePath("/follow-ups");
   return job;
 }
@@ -196,6 +200,7 @@ export async function archiveJob(id: string, archived = true) {
 
   revalidatePath("/applications");
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${user.id}`, "max");
   return job;
 }
 
@@ -246,6 +251,7 @@ export async function applyFromQueue(id: string, appliedVia?: JobFormInput["appl
   revalidatePath("/applications");
   revalidatePath(`/applications/${id}`);
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${user.id}`, "max");
   revalidatePath("/follow-ups");
   return job;
 }
@@ -274,6 +280,7 @@ export async function moveToQueue(id: string) {
   revalidatePath("/later");
   revalidatePath("/applications");
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${user.id}`, "max");
   return job;
 }
 
@@ -286,5 +293,6 @@ export async function deleteJob(id: string) {
 
   revalidatePath("/applications");
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${user.id}`, "max");
   return { success: true };
 }

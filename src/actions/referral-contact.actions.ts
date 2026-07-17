@@ -1,10 +1,12 @@
 "use server";
+
 import { revalidatePath, revalidateTag } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { referralContactFormSchema, type ReferralContactFormInput } from "@/lib/validations/referral-contact.schema";
 import { ensureDefaultStatuses, findDuplicateContact, findDuplicateLinkedInUrl } from "@/lib/referral-contacts/queries";
+import { guessNameFromLinkedInUrl } from "@/lib/referral-contacts/name-from-linkedin";
 
 function parseFollowUpDate(v?: string) {
   if (!v) return null;
@@ -19,6 +21,16 @@ async function nextRank(userId: string) {
   return (last?.rank ?? 0) + 1;
 }
 
+/** A left-blank name defaults to a guess from the LinkedIn URL (and gets
+ *  flagged Incomplete so it's easy to find and confirm later); a typed
+ *  name is trusted as-is and marked complete. Shared by create, update,
+ *  and the one-time backfill for older stub contacts below. */
+function resolveName(typedName: string, linkedInUrl: string): { fullName: string; isIncomplete: boolean } {
+  const trimmed = typedName.trim();
+  if (trimmed) return { fullName: trimmed, isIncomplete: false };
+  return { fullName: guessNameFromLinkedInUrl(linkedInUrl) ?? "Unnamed Contact", isIncomplete: true };
+}
+
 // ---------- Contact CRUD ----------
 
 export async function createReferralContact(
@@ -27,10 +39,11 @@ export async function createReferralContact(
 ) {
   const user = await requireUser();
   const data = referralContactFormSchema.parse(input);
+  const { fullName, isIncomplete } = resolveName(data.fullName, data.linkedInUrl);
 
   if (!opts.allowDuplicate) {
-    const dupName = await findDuplicateContact(user.id, data.fullName, data.company);
-    const dupLinkedIn = await findDuplicateLinkedInUrl(user.id, data.linkedInUrl);
+    const dupName = await findDuplicateContact(user.id, fullName, data.company);
+    const dupLinkedIn = await findDuplicateLinkedInUrl(user.id, data.linkedInUrl, data.company);
     if (dupName) return { duplicate: true as const, reason: "name" as const, existingId: dupName.id };
     if (dupLinkedIn) return { duplicate: true as const, reason: "linkedin" as const, existingId: dupLinkedIn.id };
   }
@@ -38,7 +51,7 @@ export async function createReferralContact(
   const contact = await prisma.referralContact.create({
     data: {
       userId: user.id,
-      fullName: data.fullName,
+      fullName,
       company: data.company,
       linkedInUrl: data.linkedInUrl,
       jobTitle: data.jobTitle || null,
@@ -47,7 +60,7 @@ export async function createReferralContact(
       nextFollowUpDate: parseFollowUpDate(data.nextFollowUpDate),
       jobApplicationId: data.jobApplicationId || null,
       rank: await nextRank(user.id),
-      isIncomplete: false,
+      isIncomplete,
     },
   });
 
@@ -60,6 +73,7 @@ export async function createReferralContact(
 export async function updateReferralContact(id: string, input: ReferralContactFormInput) {
   const user = await requireUser();
   const data = referralContactFormSchema.parse(input);
+  const { fullName, isIncomplete } = resolveName(data.fullName, data.linkedInUrl);
 
   const owned = await prisma.referralContact.findFirst({ where: { id, userId: user.id } });
   if (!owned) throw new Error("NOT_FOUND");
@@ -67,7 +81,7 @@ export async function updateReferralContact(id: string, input: ReferralContactFo
   const contact = await prisma.referralContact.update({
     where: { id },
     data: {
-      fullName: data.fullName,
+      fullName,
       company: data.company,
       linkedInUrl: data.linkedInUrl,
       jobTitle: data.jobTitle || null,
@@ -75,7 +89,7 @@ export async function updateReferralContact(id: string, input: ReferralContactFo
       statusId: data.statusId,
       nextFollowUpDate: parseFollowUpDate(data.nextFollowUpDate),
       jobApplicationId: data.jobApplicationId || null,
-      isIncomplete: false,
+      isIncomplete,
     },
   });
 
@@ -83,6 +97,64 @@ export async function updateReferralContact(id: string, input: ReferralContactFo
   revalidatePath("/dashboard");
   revalidateTag(`referral-contacts-${user.id}`, "max");
   return contact;
+}
+
+// ---------- Review Names (fix old incomplete contacts) ----------
+// Names are now extracted and written to the DB at the moment a contact is
+// created (see resolveName() above) — this section exists only to let a
+// user manually fix the older rows that predate that change, or any row
+// where the LinkedIn slug genuinely couldn't produce a confident guess.
+// Nothing here runs automatically; it's only ever called from the "Review
+// Names" dialog, and every call is a real write, never a display-only filter.
+
+export type NameUpdate = { id: string; fullName: string };
+export type NameUpdateResult = { id: string; ok: boolean; error?: string };
+
+/**
+ * Applies confirmed names for one small batch of contacts at a time — the
+ * Review Names UI calls this repeatedly (chunked) instead of one giant
+ * request, so a list of hundreds updates progressively instead of the UI
+ * hanging on a single long call. Each row is validated and written
+ * independently so one bad id in a batch doesn't fail the whole batch;
+ * the caller uses the per-id result to mark that row done or leave it
+ * editable for retry.
+ */
+export async function updateContactNames(updates: NameUpdate[]): Promise<{ results: NameUpdateResult[] }> {
+  const user = await requireUser();
+  if (updates.length === 0) return { results: [] };
+
+  const owned = await prisma.referralContact.findMany({
+    where: { id: { in: updates.map((u) => u.id) }, userId: user.id },
+    select: { id: true },
+  });
+  const ownedIds = new Set(owned.map((o) => o.id));
+
+  const results: NameUpdateResult[] = [];
+  for (const u of updates) {
+    const trimmed = u.fullName.trim();
+    if (!ownedIds.has(u.id)) {
+      results.push({ id: u.id, ok: false, error: "Contact not found" });
+      continue;
+    }
+    if (!trimmed) {
+      results.push({ id: u.id, ok: false, error: "Name can't be empty" });
+      continue;
+    }
+    try {
+      await prisma.referralContact.update({
+        where: { id: u.id },
+        data: { fullName: trimmed, isIncomplete: false },
+      });
+      results.push({ id: u.id, ok: true });
+    } catch {
+      results.push({ id: u.id, ok: false, error: "Update failed" });
+    }
+  }
+
+  revalidatePath(PATH);
+  revalidatePath("/dashboard");
+  revalidateTag(`referral-contacts-${user.id}`, "max");
+  return { results };
 }
 
 export async function deleteReferralContact(id: string) {
@@ -126,13 +198,38 @@ export async function bulkAddReferralLinks(rawLinks: string, company: string = "
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && /linkedin\.com/i.test(l));
 
-  if (links.length === 0) return { added: 0 };
+  if (links.length === 0) return { added: 0, skipped: 0 };
 
   const trimmedCompany = company.trim();
+  const normalize = (url: string) => url.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "").toLowerCase();
+
+  // A company shouldn't end up with two rows for the same profile: dedupe
+  // the pasted batch itself first (someone pastes the same link twice),
+  // then drop anything that already exists for this exact company. The
+  // same profile under a *different* company is a separate, legitimate
+  // contact (e.g. they moved employers) and is left alone.
+  const existing = await prisma.referralContact.findMany({
+    where: { userId: user.id, company: { equals: trimmedCompany, mode: "insensitive" } },
+    select: { linkedInUrl: true },
+  });
+  const existingKeys = new Set(existing.map((c) => normalize(c.linkedInUrl)));
+
+  const seen = new Set<string>();
+  const uniqueLinks: string[] = [];
+  for (const link of links) {
+    const key = normalize(link);
+    if (seen.has(key) || existingKeys.has(key)) continue;
+    seen.add(key);
+    uniqueLinks.push(link);
+  }
+
+  const skipped = links.length - uniqueLinks.length;
+  if (uniqueLinks.length === 0) return { added: 0, skipped };
+
   let rank = await nextRank(user.id);
-  const rows = links.map((linkedInUrl) => ({
+  const rows = uniqueLinks.map((linkedInUrl) => ({
     userId: user.id,
-    fullName: "Unnamed Contact",
+    fullName: resolveName("", linkedInUrl).fullName,
     company: trimmedCompany,
     linkedInUrl,
     statusId: defaultStatus.id,
@@ -143,7 +240,7 @@ export async function bulkAddReferralLinks(rawLinks: string, company: string = "
   await prisma.referralContact.createMany({ data: rows });
   revalidatePath(PATH);
   revalidateTag(`referral-contacts-${user.id}`, "max");
-  return { added: rows.length };
+  return { added: rows.length, skipped };
 }
 
 // ---------- Custom statuses ----------

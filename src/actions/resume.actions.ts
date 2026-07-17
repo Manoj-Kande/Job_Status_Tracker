@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
@@ -44,6 +44,7 @@ export async function createResume(input: ResumeFormInput) {
   }
 
   revalidatePath("/resumes");
+  revalidateTag(`resumes-data-${user.id}`, "max");
   return resume;
 }
 
@@ -76,6 +77,7 @@ export async function linkResumeToJob(jobApplicationId: string, resumeVersionId:
   revalidatePath("/applications");
   revalidatePath(`/applications/${jobApplicationId}`);
   revalidatePath("/resumes");
+  revalidateTag(`resumes-data-${user.id}`, "max");
   return updated;
 }
 
@@ -93,6 +95,7 @@ export async function updateResume(id: string, input: Partial<ResumeFormInput>) 
   });
 
   revalidatePath("/resumes");
+  revalidateTag(`resumes-data-${user.id}`, "max");
   return resume;
 }
 
@@ -104,5 +107,6 @@ export async function deleteResume(id: string) {
   await prisma.resumeVersion.delete({ where: { id } });
 
   revalidatePath("/resumes");
+  revalidateTag(`resumes-data-${user.id}`, "max");
   return { success: true };
 }

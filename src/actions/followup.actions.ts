@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import type { FollowUpType } from "@prisma/client";
@@ -26,11 +26,12 @@ export async function createFollowUp(
   jobApplicationId: string,
   input: { followUpDate: Date; followUpType: FollowUpType; reminderNotes?: string }
 ) {
-  await assertOwnsJob(jobApplicationId);
+  const job = await assertOwnsJob(jobApplicationId);
   const followUp = await prisma.followUp.create({ data: { jobApplicationId, ...input } });
 
   revalidatePath(`/applications/${jobApplicationId}`);
   revalidatePath("/follow-ups");
+  revalidateTag(`jobs-data-${job.userId}`, "max");
   return followUp;
 }
 
@@ -44,6 +45,7 @@ export async function completeFollowUp(id: string, outcomeNotes?: string) {
   revalidatePath(`/applications/${followUp.jobApplicationId}`);
   revalidatePath("/follow-ups");
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${followUp.jobApplication.userId}`, "max");
   return updated;
 }
 
@@ -56,6 +58,7 @@ export async function rescheduleFollowUp(id: string, followUpDate: Date) {
 
   revalidatePath(`/applications/${followUp.jobApplicationId}`);
   revalidatePath("/follow-ups");
+  revalidateTag(`jobs-data-${followUp.jobApplication.userId}`, "max");
   return updated;
 }
 
@@ -76,6 +79,7 @@ export async function updateFollowUp(
   revalidatePath(`/applications/${followUp.jobApplicationId}`);
   revalidatePath("/follow-ups");
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${followUp.jobApplication.userId}`, "max");
   return updated;
 }
 
@@ -86,5 +90,6 @@ export async function deleteFollowUp(id: string) {
   revalidatePath(`/applications/${followUp.jobApplicationId}`);
   revalidatePath("/follow-ups");
   revalidatePath("/dashboard");
+  revalidateTag(`jobs-data-${followUp.jobApplication.userId}`, "max");
   return { success: true };
 }

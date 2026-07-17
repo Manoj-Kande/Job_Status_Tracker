@@ -65,7 +65,7 @@ export function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             user&apos;s data is never modified. Possible duplicates are flagged, not blocked.
           </p>
         </div>
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex flex-wrap justify-end gap-2 pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={handleImport} disabled={submitting}>{submitting ? "Importing..." : "Import Contacts"}</Button>
         </div>

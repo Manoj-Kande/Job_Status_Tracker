@@ -102,11 +102,12 @@ export function DeleteContactsDialog({
           <DialogTitle>Delete Contacts</DialogTitle>
         </DialogHeader>
 
-        <p className="text-sm text-destructive">
-          This permanently removes the contacts you choose below — it can&apos;t be undone.
-        </p>
+        <div className="space-y-4">
+          <p className="text-sm text-destructive">
+            This permanently removes the contacts you choose below — it can&apos;t be undone.
+          </p>
 
-        <div className="space-y-2 pt-1">
+          <div className="space-y-2">
           {(["companies", "selected", "all"] as const).map((s) => (
             <label
               key={s}
@@ -165,11 +166,12 @@ export function DeleteContactsDialog({
           />
         )}
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button variant="destructive" onClick={handleConfirm} disabled={submitting}>
             {submitting ? "Deleting..." : "Delete Contacts"}
           </Button>
+        </div>
         </div>
       </DialogContent>
     </Dialog>

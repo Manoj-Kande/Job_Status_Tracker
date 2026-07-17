@@ -31,7 +31,11 @@ function emptyValues(defaultStatusId: string): ReferralContactFormInput {
 
 function valuesFromContact(contact: ReferralContact): ReferralContactFormInput {
   return {
-    fullName: contact.isIncomplete ? "" : contact.fullName,
+    // Bulk Add now guesses a name from the LinkedIn slug when it can (still
+    // marked isIncomplete until the person confirms it) — that's worth
+    // showing, editable, rather than forcing a retype. Only the old literal
+    // placeholder from before that existed gets blanked out.
+    fullName: contact.fullName === "Unnamed Contact" ? "" : contact.fullName,
     company: contact.company,
     linkedInUrl: contact.linkedInUrl,
     jobTitle: contact.jobTitle ?? "",
@@ -96,8 +100,8 @@ export function ContactFormSheet({
     setSubmitting(true);
     try {
       if (isEdit && contact) {
-        await updateReferralContact(contact.id, values);
-        toast.success("Contact updated", { description: `${values.fullName} — ${values.company}` });
+        const updated = await updateReferralContact(contact.id, values);
+        toast.success("Contact updated", { description: `${updated.fullName} — ${updated.company}` });
       } else {
         const result = await createReferralContact(values, { allowDuplicate: !!dupWarning });
         if (result.duplicate) {
@@ -105,13 +109,13 @@ export function ContactFormSheet({
           toast.warning("Possible duplicate", {
             description:
               result.reason === "linkedin"
-                ? "This LinkedIn profile is already saved. Save again to add anyway."
+                ? "This LinkedIn profile is already saved for this company. Save again to add anyway."
                 : "You already have a contact with this name at this company. Save again to add anyway.",
           });
           setSubmitting(false);
           return;
         }
-        toast.success("Contact added", { description: `${values.fullName} — ${values.company}` });
+        toast.success("Contact added", { description: `${result.contact.fullName} — ${result.contact.company}` });
       }
       onOpenChange(false);
       router.refresh();
@@ -147,16 +151,19 @@ export function ContactFormSheet({
         </SheetHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 px-4 pb-6">
+          <fieldset disabled={submitting} className="contents">
           {dupWarning && (
             <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
               {dupWarning === "linkedin"
-                ? "This LinkedIn profile is already saved. Submitting again will add it anyway."
+                ? "This LinkedIn profile is already saved for this company. Submitting again will add it anyway."
                 : "You already have a contact with this name at this company. Submitting again will add it anyway."}
             </div>
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="fullName">Full Name</Label>
+            <Label htmlFor="fullName">
+              Full Name <span className="font-normal text-muted-foreground">(optional — guessed from LinkedIn if left blank)</span>
+            </Label>
             <Input id="fullName" placeholder="e.g. Priya Nair" {...register("fullName")} />
             {errors.fullName && <p className="text-xs text-destructive">{errors.fullName.message}</p>}
           </div>
@@ -267,6 +274,7 @@ export function ContactFormSheet({
               {submitting ? "Saving..." : dupWarning ? "Add Anyway" : "Save Contact"}
             </Button>
           </div>
+          </fieldset>
         </form>
       </SheetContent>
     </Sheet>

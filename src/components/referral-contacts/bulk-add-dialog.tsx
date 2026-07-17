@@ -41,12 +41,16 @@ export function BulkAddDialog({
     }
     setSubmitting(true);
     try {
-      const { added } = await bulkAddReferralLinks(links, company);
+      const { added, skipped } = await bulkAddReferralLinks(links, company);
       toast.success(`${added} stub contact${added === 1 ? "" : "s"} added`, {
         description:
           added > 0
-            ? `Marked Incomplete${company.trim() ? ` under "${company.trim()}"` : ""} — fill in the rest later.`
-            : "No valid LinkedIn links found.",
+            ? `Marked Incomplete${company.trim() ? ` under "${company.trim()}"` : ""} — fill in the rest later.${
+                skipped > 0 ? ` ${skipped} skipped (already saved for this company).` : ""
+              }`
+            : skipped > 0
+              ? `All ${skipped} of those are already saved for this company — nothing new to add.`
+              : "No valid LinkedIn links found.",
       });
       setLinks("");
       setCompany("");
@@ -124,7 +128,7 @@ export function BulkAddDialog({
               default status &quot;Can Ask Referral&quot; — fill in the name (and company, if left blank) later.
             </p>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={submitting}>
               {submitting ? "Adding..." : "Add Stub Contacts"}

@@ -64,6 +64,13 @@ function slugify(text: string) {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
+// The on-screen JSON preview exists so people can sanity-check the shape
+// before exporting, not to render the whole payload — stringifying and
+// laying out thousands of rows of text on every toggle is real, avoidable
+// work. Copy/Download always use the full `filtered` list; only the visible
+// <pre> is capped.
+const PREVIEW_LIMIT = 25;
+
 function filenameStem(scope: Scope, companies: string[], peopleCount: number) {
   if (scope === "people") return peopleCount === 1 ? "1-contact" : `${peopleCount}-contacts`;
   if (scope === "all" || companies.length === 0) return "all-contacts";
@@ -81,6 +88,41 @@ function download(content: string, filename: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
+// The company picker and the people picker both need the same three
+// operations on a Set<string> (toggle one, add many, clear). Writing that
+// logic out twice (once per picker) is how the two quietly drift apart the
+// next time either one needs a fix — one hook, two call sites.
+function useIdSelection() {
+  const [set, setSet] = React.useState<Set<string>>(() => new Set());
+
+  const toggle = React.useCallback((id: string) => {
+    setSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const remove = React.useCallback((id: string) => {
+    setSet((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const addMany = React.useCallback((ids: string[]) => {
+    setSet((prev) => new Set([...prev, ...ids]));
+  }, []);
+
+  const clear = React.useCallback(() => setSet(new Set()), []);
+  const reset = React.useCallback(() => setSet(new Set()), []);
+
+  return { set, toggle, remove, addMany, clear, reset };
+}
+
 export function ExportDialog({
   open,
   onOpenChange,
@@ -95,8 +137,8 @@ export function ExportDialog({
   statuses: ReferralContactStatus[];
 }) {
   const [scope, setScope] = React.useState<Scope>("all");
-  const [companySel, setCompanySel] = React.useState<Set<string>>(new Set());
-  const [peopleSel, setPeopleSel] = React.useState<Set<string>>(new Set());
+  const companies = useIdSelection();
+  const people = useIdSelection();
   const [prevOpen, setPrevOpen] = React.useState(open);
 
   // Render-time reset (not an effect) so re-opening the dialog always starts
@@ -105,8 +147,8 @@ export function ExportDialog({
     setPrevOpen(open);
     if (open) {
       setScope("all");
-      setCompanySel(new Set());
-      setPeopleSel(new Set());
+      companies.reset();
+      people.reset();
     }
   }
 
@@ -121,7 +163,10 @@ export function ExportDialog({
       .map(([company, count]) => ({ id: company, label: company, sublabel: `${count} contact${count === 1 ? "" : "s"}` }));
   }, [contacts]);
 
-  const selectedCompanies = React.useMemo(() => [...companySel].sort((a, b) => a.localeCompare(b)), [companySel]);
+  const selectedCompanies = React.useMemo(
+    () => [...companies.set].sort((a, b) => a.localeCompare(b)),
+    [companies.set]
+  );
 
   const contactItems = React.useMemo(
     () => contacts.map((c) => ({ id: c.id, label: c.fullName, sublabel: c.company.trim() || "No company set" })),
@@ -132,44 +177,18 @@ export function ExportDialog({
   // keystroke/checkbox toggle without any loading state.
   const filtered = React.useMemo(() => {
     if (scope === "all") return contacts;
-    if (scope === "people") return contacts.filter((c) => peopleSel.has(c.id));
-    if (companySel.size === 0) return [];
-    return contacts.filter((c) => companySel.has(c.company.trim()));
-  }, [contacts, scope, companySel, peopleSel]);
+    if (scope === "people") return contacts.filter((c) => people.set.has(c.id));
+    if (companies.set.size === 0) return [];
+    return contacts.filter((c) => companies.set.has(c.company.trim()));
+  }, [contacts, scope, companies.set, people.set]);
 
-  function toggleCompany(id: string) {
-    setCompanySel((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function removeCompany(company: string) {
-    setCompanySel((prev) => {
-      const next = new Set(prev);
-      next.delete(company);
-      return next;
-    });
-  }
-
-  function togglePerson(id: string) {
-    setPeopleSel((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function selectAllPeopleFiltered(ids: string[]) {
-    setPeopleSel((prev) => new Set([...prev, ...ids]));
-  }
-
-  const blocked = (scope === "companies" && companySel.size === 0) || (scope === "people" && peopleSel.size === 0);
+  const blocked = (scope === "companies" && companies.set.size === 0) || (scope === "people" && people.set.size === 0);
   const companyCount =
-    scope === "all" ? companyItems.length : scope === "people" ? new Set(filtered.map((c) => c.company.trim())).size : companySel.size;
+    scope === "all"
+      ? companyItems.length
+      : scope === "people"
+        ? new Set(filtered.map((c) => c.company.trim())).size
+        : companies.set.size;
 
   function guard() {
     if (blocked) {
@@ -188,7 +207,7 @@ export function ExportDialog({
     if (guard()) return;
     download(
       buildJson(filtered, statuses),
-      `referral-contacts-${filenameStem(scope, selectedCompanies, peopleSel.size)}-export.json`,
+      `referral-contacts-${filenameStem(scope, selectedCompanies, people.set.size)}-export.json`,
       "application/json"
     );
     toast.success(`Downloaded ${filtered.length} contact${filtered.length === 1 ? "" : "s"} as JSON`);
@@ -198,25 +217,25 @@ export function ExportDialog({
     if (guard()) return;
     download(
       buildCsv(filtered),
-      `referral-contacts-${filenameStem(scope, selectedCompanies, peopleSel.size)}-export.csv`,
+      `referral-contacts-${filenameStem(scope, selectedCompanies, people.set.size)}-export.csv`,
       "text/csv"
     );
     toast.success(`Downloaded ${filtered.length} contact${filtered.length === 1 ? "" : "s"} as CSV`);
   }
 
-  const preview = React.useMemo(() => buildJson(filtered, statuses), [filtered, statuses]);
+  const preview = React.useMemo(() => buildJson(filtered.slice(0, PREVIEW_LIMIT), statuses), [filtered, statuses]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl gap-0 p-0 overflow-hidden">
-        <DialogHeader className="mb-0 border-b border-border px-7 py-5">
+        <DialogHeader className="mb-0 border-b border-border px-7 py-4">
           <DialogTitle className="text-xl">Export Referral Contacts</DialogTitle>
           <DialogDescription>
             Export everything, pick specific companies, or hand-select individual people — even across companies.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[75vh] space-y-6 overflow-y-auto px-7 py-6">
+        <div className="max-h-[70vh] space-y-5 overflow-y-auto px-7 py-5">
           {/* Scope selector */}
           <div className="space-y-2.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Scope</span>
@@ -233,7 +252,7 @@ export function ExportDialog({
                   type="button"
                   onClick={() => setScope(key)}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-lg border border-border px-4 py-3 text-left text-sm font-medium transition-colors",
+                    "flex items-center gap-2.5 rounded-lg border border-border px-4 py-2.5 text-left text-sm font-medium transition-colors",
                     scope === key ? "border-primary bg-accent/50 text-foreground" : "text-muted-foreground hover:bg-muted/40"
                   )}
                 >
@@ -252,10 +271,10 @@ export function ExportDialog({
               </span>
               <SearchSelectPicker
                 items={companyItems}
-                selectedIds={companySel}
-                onToggle={toggleCompany}
-                onClear={() => setCompanySel(new Set())}
-                onSelectFiltered={(ids) => setCompanySel((prev) => new Set([...prev, ...ids]))}
+                selectedIds={companies.set}
+                onToggle={companies.toggle}
+                onClear={companies.clear}
+                onSelectFiltered={companies.addMany}
                 placeholder="Search companies..."
                 emptyText="No companies match"
               />
@@ -270,7 +289,7 @@ export function ExportDialog({
                       {company}
                       <button
                         type="button"
-                        onClick={() => removeCompany(company)}
+                        onClick={() => companies.remove(company)}
                         className="rounded-full p-0.5 text-muted-foreground hover:bg-primary/20 hover:text-foreground"
                         aria-label={`Remove ${company}`}
                       >
@@ -290,50 +309,49 @@ export function ExportDialog({
                 Search people
               </span>
               <p className="text-xs text-muted-foreground">
-                Tip: search a company name to narrow the list to just its people — the company shows under each
-                name — then use <span className="font-medium text-foreground">Select all shown</span> if you want
-                most of them, and hand-uncheck the rest.
+                Tip: search a company name, then <span className="font-medium text-foreground">Select all shown</span>{" "}
+                to grab everyone at once.
               </p>
               <SearchSelectPicker
                 items={contactItems}
-                selectedIds={peopleSel}
-                onToggle={togglePerson}
-                onClear={() => setPeopleSel(new Set())}
-                onSelectFiltered={selectAllPeopleFiltered}
+                selectedIds={people.set}
+                onToggle={people.toggle}
+                onClear={people.clear}
+                onSelectFiltered={people.addMany}
                 placeholder="Search people or companies..."
                 emptyText="No contacts match"
               />
             </div>
           )}
 
-          {/* Live summary */}
-          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3">
-            <div className="text-sm">
-              <span className="font-semibold">{filtered.length}</span>{" "}
-              <span className="text-muted-foreground">
-                contact{filtered.length === 1 ? "" : "s"} from {companyCount} compan{companyCount === 1 ? "y" : "ies"} will
-                be exported
-              </span>
-            </div>
-          </div>
-
-          {/* Preview */}
+          {/* Preview — its footer line doubles as the export summary, so
+              there's no separate "N contacts will be exported" banner
+              repeating the same count right above it. */}
           <div className="space-y-2">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Preview</span>
-            <pre className="max-h-56 overflow-auto rounded-lg border border-border bg-muted/40 p-3.5 text-[11px] leading-relaxed whitespace-pre-wrap break-all">
-              {blocked
-                ? scope === "people"
-                  ? "Select at least one person to preview the export."
-                  : "Select at least one company to preview the export."
-                : preview}
-            </pre>
+            <div className="overflow-hidden rounded-lg border border-border">
+              <pre className="max-h-48 overflow-auto bg-muted/40 p-3.5 text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+                {blocked
+                  ? scope === "people"
+                    ? "Select at least one person to preview the export."
+                    : "Select at least one company to preview the export."
+                  : preview}
+              </pre>
+              <div className="border-t border-border bg-muted/30 px-3.5 py-1.5 text-xs text-muted-foreground">
+                {blocked
+                  ? "Nothing selected yet"
+                  : filtered.length > PREVIEW_LIMIT
+                    ? `Showing first ${PREVIEW_LIMIT} of ${filtered.length} contacts (${companyCount} compan${companyCount === 1 ? "y" : "ies"}) — the full set is included in the export`
+                    : `${filtered.length} contact${filtered.length === 1 ? "" : "s"} from ${companyCount} compan${companyCount === 1 ? "y" : "ies"} ready to export`}
+              </div>
+            </div>
             <p className="text-xs text-muted-foreground">
               JSON round-trips cleanly through Import (including custom statuses). CSV is for opening in Excel/Sheets.
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/20 px-7 py-4">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/20 px-7 py-3.5">
           <Button variant="outline" onClick={handleCopy} disabled={blocked}>
             <Copy className="size-3.5" /> Copy JSON
           </Button>
