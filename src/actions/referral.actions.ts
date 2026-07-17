@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import type { ReferralStatus } from "@prisma/client";
@@ -23,13 +23,14 @@ export async function createReferral(
     notes?: string;
   }
 ) {
-  await assertOwnsJob(jobApplicationId);
+  const job = await assertOwnsJob(jobApplicationId);
 
   const referral = await prisma.referral.create({
     data: { jobApplicationId, referralStatus: input.referralStatus ?? "NOT_ASKED", ...input },
   });
 
   revalidatePath(`/applications/${jobApplicationId}`);
+  revalidateTag(`jobs-data-${job.userId}`, "max");
   return referral;
 }
 
@@ -48,15 +49,17 @@ export async function updateReferral(
     notes: string;
   }>
 ) {
-  await assertOwnsJob(jobApplicationId);
+  const job = await assertOwnsJob(jobApplicationId);
   const referral = await prisma.referral.update({ where: { id }, data: input });
   revalidatePath(`/applications/${jobApplicationId}`);
+  revalidateTag(`jobs-data-${job.userId}`, "max");
   return referral;
 }
 
 export async function deleteReferral(id: string, jobApplicationId: string) {
-  await assertOwnsJob(jobApplicationId);
+  const job = await assertOwnsJob(jobApplicationId);
   await prisma.referral.delete({ where: { id } });
   revalidatePath(`/applications/${jobApplicationId}`);
+  revalidateTag(`jobs-data-${job.userId}`, "max");
   return { success: true };
 }

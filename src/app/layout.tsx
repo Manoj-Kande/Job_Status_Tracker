@@ -24,7 +24,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <body className="min-h-full flex flex-col">
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
             {children}
-            <Toaster richColors position="top-right" closeButton />
+            <Toaster richColors position="top-right" closeButton duration={3500} />
           </ThemeProvider>
         </body>
       </html>

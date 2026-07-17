@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { GripVertical, Pencil, Trash2, ExternalLink, Link2, CalendarClock } from "lucide-react";
+import { GripVertical, Pencil, Trash2, ExternalLink, Link2, CalendarClock, Loader2 } from "lucide-react";
 import type { ReferralContact, ReferralContactStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { ReferralStatusBadge } from "@/components/referral-contacts/status-badge";
@@ -37,6 +37,7 @@ export function ContactListTable({
   const router = useRouter();
   const [localOrder, setLocalOrder] = React.useState(contacts);
   const [prevContacts, setPrevContacts] = React.useState(contacts);
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const dragId = React.useRef<string | null>(null);
 
   // Resync local (draggable) order when the server-provided list changes
@@ -49,12 +50,17 @@ export function ContactListTable({
 
   async function handleDelete(contact: ReferralContact) {
     if (!confirm(`Delete ${contact.fullName}? This can't be undone.`)) return;
+    setDeletingId(contact.id);
     try {
       await deleteReferralContact(contact.id);
       toast.success("Contact deleted");
       router.refresh();
     } catch {
-      toast.error("Couldn't delete that contact");
+      // Nothing was removed from local state before this awaited, so
+      // there's nothing to roll back — the row simply stays as-is.
+      toast.error("Couldn't delete that contact. Please try again.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -111,14 +117,17 @@ export function ContactListTable({
           </tr>
         </thead>
         <tbody>
-          {localOrder.map((c, i) => (
+          {localOrder.map((c) => (
             <tr
               key={c.id}
               draggable={rankMode}
               onDragStart={() => (dragId.current = c.id)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => handleDrop(c.id)}
-              className="group relative border-b border-border last:border-b-0 hover:bg-muted/30"
+              className={cn(
+                "group relative border-b border-border last:border-b-0 hover:bg-muted/30",
+                deletingId === c.id && "pointer-events-none opacity-50"
+              )}
             >
               {rankMode && (
                 <td className="px-3 py-2.5 text-muted-foreground">
@@ -126,19 +135,10 @@ export function ContactListTable({
                 </td>
               )}
               {onToggleSelect && (
-                <td className="relative px-3 py-2.5">
-                  <span
-                    className={cn(
-                      "pointer-events-none absolute left-[13px] w-px bg-[#E5E2D9] dark:bg-border",
-                      i === 0 && "top-1/2 bottom-0",
-                      i === localOrder.length - 1 && "top-0 h-1/2",
-                      i !== 0 && i !== localOrder.length - 1 && "top-0 bottom-0"
-                    )}
-                  />
-                  <span className="pointer-events-none absolute left-[10px] top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-[#1F6F5C] ring-2 ring-card dark:bg-primary" />
+                <td className="px-3 py-2.5">
                   <input
                     type="checkbox"
-                    className="relative z-10 size-3.5 rounded border-border accent-primary"
+                    className="size-3.5 rounded border-border accent-primary"
                     checked={!!selectedIds?.has(c.id)}
                     onChange={() => onToggleSelect(c.id)}
                   />
@@ -191,8 +191,9 @@ export function ContactListTable({
                     size="icon"
                     className="size-7 text-muted-foreground hover:text-destructive"
                     onClick={() => handleDelete(c)}
+                    disabled={deletingId === c.id}
                   >
-                    <Trash2 className="size-3.5" />
+                    {deletingId === c.id ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
                   </Button>
                 </div>
               </td>

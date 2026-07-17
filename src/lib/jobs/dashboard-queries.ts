@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { startOfDay, endOfDay, addDays } from "date-fns";
@@ -36,38 +37,47 @@ export async function getDashboardData() {
   // the active pipeline until the user applies and moves them out of it.
   const baseJob = { userId: user.id, archived: false, savedForLater: false } as const;
 
+  const dayKey = todayStart.toISOString().slice(0, 10); // cache key must roll over at midnight, not just on writes
+
   const [statusCounts, dueToday, overdue, highPriorityToApply, deadlineSoon, candidatesForStale, recentHistory] =
-    await Promise.all([
-      prisma.jobApplication.groupBy({ by: ["applicationStatus"], where: baseJob, _count: true }),
-      prisma.followUp.findMany({
-        where: { completed: false, followUpDate: { gte: todayStart, lte: todayEnd }, jobApplication: baseJob },
-        include: { jobApplication: { select: { id: true, companyName: true, jobTitle: true } } },
-      }),
-      prisma.followUp.findMany({
-        where: { completed: false, followUpDate: { lt: todayStart }, jobApplication: baseJob },
-        include: { jobApplication: { select: { id: true, companyName: true, jobTitle: true } } },
-      }),
-      prisma.jobApplication.findMany({
-        where: { ...baseJob, priority: "HIGH", applicationStatus: { in: ["TO_APPLY", "REFERRAL_NEEDED"] } },
-        orderBy: { dateDiscovered: "desc" },
-        take: 8,
-      }),
-      prisma.jobApplication.findMany({
-        where: { ...baseJob, applicationDeadline: { gte: now, lte: sevenDaysOut } },
-        orderBy: { applicationDeadline: "asc" },
-        take: 8,
-      }),
-      prisma.jobApplication.findMany({
-        where: baseJob,
-        select: { id: true, companyName: true, jobTitle: true, applicationStatus: true, archived: true, updatedAt: true, nextFollowUpDate: true },
-      }),
-      prisma.statusHistory.findMany({
-        where: { jobApplication: { userId: user.id } },
-        orderBy: { createdAt: "desc" },
-        take: 10,
-        include: { jobApplication: { select: { companyName: true, jobTitle: true } } },
-      }),
-    ]);
+    await unstable_cache(
+      () =>
+        Promise.all([
+          prisma.jobApplication.groupBy({ by: ["applicationStatus"], where: baseJob, _count: true }),
+          prisma.followUp.findMany({
+            where: { completed: false, followUpDate: { gte: todayStart, lte: todayEnd }, jobApplication: baseJob },
+            include: { jobApplication: { select: { id: true, companyName: true, jobTitle: true } } },
+          }),
+          prisma.followUp.findMany({
+            where: { completed: false, followUpDate: { lt: todayStart }, jobApplication: baseJob },
+            include: { jobApplication: { select: { id: true, companyName: true, jobTitle: true } } },
+          }),
+          prisma.jobApplication.findMany({
+            where: { ...baseJob, priority: "HIGH", applicationStatus: { in: ["TO_APPLY", "REFERRAL_NEEDED"] } },
+            orderBy: { dateDiscovered: "desc" },
+            take: 8,
+            select: { id: true, companyName: true, jobTitle: true },
+          }),
+          prisma.jobApplication.findMany({
+            where: { ...baseJob, applicationDeadline: { gte: now, lte: sevenDaysOut } },
+            orderBy: { applicationDeadline: "asc" },
+            take: 8,
+            select: { id: true, companyName: true, applicationDeadline: true },
+          }),
+          prisma.jobApplication.findMany({
+            where: baseJob,
+            select: { id: true, companyName: true, jobTitle: true, applicationStatus: true, archived: true, updatedAt: true, nextFollowUpDate: true },
+          }),
+          prisma.statusHistory.findMany({
+            where: { jobApplication: { userId: user.id } },
+            orderBy: { createdAt: "desc" },
+            take: 10,
+            include: { jobApplication: { select: { companyName: true, jobTitle: true } } },
+          }),
+        ]),
+      ["dashboard-data", user.id, dayKey],
+      { tags: [`jobs-data-${user.id}`], revalidate: 60 }
+    )();
 
   type StatusCount = { applicationStatus: string; _count: number };
   const typedStatusCounts = statusCounts as StatusCount[];

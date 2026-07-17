@@ -52,18 +52,25 @@ export function QuickAddDrawer() {
     setValue,
   } = useForm<QuickAddInput>({ resolver: zodResolver(quickAddSchema), defaultValues });
 
-  // Keyboard shortcut: "c" opens Quick Add (ignored while typing in a field)
+  // Keyboard shortcut: "c" opens Quick Add (ignored while typing in a field,
+  // while any modifier is held — Ctrl/Cmd+C for copy has the same e.key as a
+  // bare "c" press, so that check is required — and while another dialog or
+  // sheet is already open, so this can't pop open on top of one).
   React.useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (e.key.toLowerCase() === "c" && tag !== "INPUT" && tag !== "TEXTAREA") {
-        e.preventDefault();
-        setOpen(true);
-      }
+      if (open) return;
+      if (e.key.toLowerCase() !== "c") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      e.preventDefault();
+      setOpen(true);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [open]);
 
   async function onSubmit(values: QuickAddInput) {
     setSubmitting(true);
@@ -95,7 +102,16 @@ export function QuickAddDrawer() {
           <span className="hidden sm:inline">Quick Add</span>
         </Button>
       </SheetTrigger>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
+      <SheetContent
+        side="right"
+        className="w-full overflow-y-auto sm:max-w-md"
+        onPointerDownOutside={(e) => {
+          if (watch("companyName")?.trim() || watch("jobPostingUrl")?.trim()) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (watch("companyName")?.trim() || watch("jobPostingUrl")?.trim()) e.preventDefault();
+        }}
+      >
         <SheetHeader>
           <SheetTitle>Quick Add Job</SheetTitle>
         </SheetHeader>

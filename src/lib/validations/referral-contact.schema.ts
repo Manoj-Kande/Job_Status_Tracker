@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 export const referralContactFormSchema = z.object({
-  fullName: z.string().trim().min(1, "Full name is required").max(200),
+  // Left blank is allowed on purpose: if the person doesn't type a name,
+  // the server derives one from the LinkedIn URL slug (and marks the
+  // contact Incomplete) instead of blocking the save entirely.
+  fullName: z.string().trim().max(200),
   company: z.string().trim().min(1, "Company is required").max(200),
   linkedInUrl: z
     .string()

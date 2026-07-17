@@ -25,6 +25,7 @@ import { ExportDialog } from "@/components/referral-contacts/export-dialog";
 import { ImportDialog } from "@/components/referral-contacts/import-dialog";
 import { ResetStatusDialog } from "@/components/referral-contacts/reset-status-dialog";
 import { DeleteContactsDialog } from "@/components/referral-contacts/delete-contacts-dialog";
+import { ReviewNamesDialog } from "@/components/referral-contacts/review-names-dialog";
 import { cn } from "@/lib/utils";
 
 type ContactWithStatus = ReferralContact & {
@@ -123,7 +124,16 @@ export function ReferralContactsView({
   const [resetOpen, setResetOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [manageCardsOpen, setManageCardsOpen] = React.useState(false);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+
+  // Names are extracted from the LinkedIn URL and written to the DB the
+  // moment a contact is created (see resolveName() server-side) — there's
+  // no client-side filter-and-display step to patch up here. This list is
+  // only for contacts where that extraction genuinely failed (or predate
+  // it); fixing them is an explicit, user-driven action via "Review Names",
+  // never something that silently rewrites data in the background.
+  const incompleteContacts = React.useMemo(() => contacts.filter((c) => c.isIncomplete), [contacts]);
 
   // Everything below is derived in-memory from the single `contacts` array
   // the server sent down — no network round trip for search, sort, status
@@ -319,6 +329,11 @@ export function ReferralContactsView({
         <div className="flex-1" />
 
         <div className="flex flex-wrap items-center gap-2">
+          {incompleteContacts.length > 0 && (
+            <Button variant="outline" size="sm" className="text-warning hover:text-warning" onClick={() => setReviewOpen(true)}>
+              Review Names <span className="ml-1 rounded-full bg-warning/15 px-1.5 text-[10px] font-semibold">{incompleteContacts.length}</span>
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setResetOpen(true)}>Reset Status</Button>
           <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleteOpen(true)}>Delete Contacts</Button>
           <Button variant="outline" size="sm" onClick={() => setStatusesOpen(true)}>Manage Statuses</Button>
@@ -432,6 +447,7 @@ export function ReferralContactsView({
         statuses={statuses}
         contacts={contacts.map((c) => ({ statusId: c.statusId }))}
       />
+      <ReviewNamesDialog open={reviewOpen} onOpenChange={setReviewOpen} contacts={incompleteContacts} />
     </div>
   );
 }

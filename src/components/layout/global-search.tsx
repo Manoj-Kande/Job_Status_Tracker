@@ -62,18 +62,45 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
 
   React.useEffect(() => {
     const q = query.trim();
+    // Nothing to do when cleared — the UI already falls back to the
+    // "start typing" hint whenever the query is blank (see
+    // showEmptyQueryHint below), regardless of whatever jobs/resumes are
+    // still sitting in state, so there's no stale-flash risk to guard here.
     if (!q) return;
-    const handle = setTimeout(() => {
-      setLoading(true);
+
+    // Two searches can be in flight at once if responses arrive out of
+    // order (e.g. a slower request for an earlier keystroke resolving
+    // after a faster one for a later keystroke) — `cancelled` makes sure
+    // only the result for the *current* query is ever applied.
+    let cancelled = false;
+
+    // Loading flips on almost immediately (a 0ms timeout, not the effect
+    // body itself — synchronous setState in an effect body cascades
+    // renders) so the list is clearly marked "stale, refreshing" right
+    // away, instead of silently showing the *previous* query's matches
+    // for the whole 200ms debounce window below.
+    const loadingHandle = setTimeout(() => {
+      if (!cancelled) setLoading(true);
+    }, 0);
+
+    const searchHandle = setTimeout(() => {
       globalSearch(q)
         .then((res) => {
+          if (cancelled) return;
           setJobs(res.jobs);
           setResumes(res.resumes);
           setActiveIndex(0);
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
     }, 200);
-    return () => clearTimeout(handle);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(loadingHandle);
+      clearTimeout(searchHandle);
+    };
   }, [query]);
 
   function go(result: Result) {

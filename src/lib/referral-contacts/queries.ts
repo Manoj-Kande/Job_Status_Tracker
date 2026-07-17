@@ -89,13 +89,19 @@ export async function findDuplicateContact(userId: string, fullName: string, com
   });
 }
 
-/** Separate from name+company matching: catches re-pasting the same profile under a typo'd name. */
-export async function findDuplicateLinkedInUrl(userId: string, linkedInUrl: string, excludeId?: string) {
-  const normalize = (url: string) => url.replace(/^https?:\/\//i, "").replace(/\/$/, "").toLowerCase();
+/** Same profile pasted again under a typo'd name — scoped to company, since
+ *  the same person showing up at a *different* company (they moved jobs) is
+ *  a legitimately different contact, not a duplicate. */
+export async function findDuplicateLinkedInUrl(userId: string, linkedInUrl: string, company: string, excludeId?: string) {
+  const normalize = (url: string) => url.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "").toLowerCase();
   const target = normalize(linkedInUrl);
   const candidates = await prisma.referralContact.findMany({
-    where: { userId, id: excludeId ? { not: excludeId } : undefined },
-    select: { id: true, linkedInUrl: true, fullName: true },
+    where: {
+      userId,
+      id: excludeId ? { not: excludeId } : undefined,
+      company: { equals: company.trim(), mode: "insensitive" },
+    },
+    select: { id: true, linkedInUrl: true },
   });
   return candidates.find((c) => normalize(c.linkedInUrl) === target) ?? null;
 }
